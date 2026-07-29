@@ -1,34 +1,42 @@
 <?php
+
 namespace App\Jobs;
 
-use App\Services\Scraper\PageFetcher;
-use App\Services\Scraper\ProductParser;
-use App\Services\Scraper\ProductStorer;
+use App\Services\Scrapper\PageFetcher;
+use App\Services\Scrapper\ProductFetcher;
+use App\Services\Scrapper\ProductStorer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Queue\Throttle;
 
 class ScrapeProductPage implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries   = 3;
+    public int $tries = 3;
+
     public int $backoff = 30;
 
     public function __construct(private readonly string $url) {}
-    
+
+    /**
+     * Enforce rate limiting: max 10 requests per minute across all workers.
+     *
+     * The `scraper` limiter is registered in AppServiceProvider.
+     *
+     * @return array<int, object>
+     */
     public function middleware(): array
     {
-        // Enforce rate limiting: max 10 requests per 60 seconds across all workers
-        return [new Throttle(key: 'scraper', maxAttempts: 10, decaySeconds: 60)];
+        return [new RateLimited('scraper')];
     }
 
-    public function handle(PageFetcher $fetcher, ProductParser $parser, ProductStorer $storer): void
+    public function handle(PageFetcher $fetcher, ProductFetcher $parser, ProductStorer $storer): void
     {
-        $html  = $fetcher->fetch($this->url);
+        $html = $fetcher->fetch($this->url);
         $items = $parser->parse($html);
         $storer->store($items);
     }

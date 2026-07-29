@@ -63,7 +63,9 @@ The job is the only orchestrator; each service does one thing and is resolved ou
 
 **`ProductStorer`** — `updateOrCreate` keyed on `url`, which is `unique()` on the `products` table. Re-scraping the same page therefore refreshes prices instead of duplicating rows. Rows whose URL fell back to `'#'` are skipped.
 
-**`ScrapeProductPage`** — `$tries = 3` with `$backoff = 30`, plus queue middleware intended to cap the whole scraper at 10 requests per 60 seconds across every worker.
+**`ScrapeProductPage`** — `$tries = 3` with `$backoff = 30`, plus a `RateLimited('scraper')` queue middleware that caps the whole scraper at 10 requests per minute across every worker. The named `scraper` limiter is registered in `AppServiceProvider::boot()`; change the rate there, not in the job.
+
+Note that retry budgets stack: `PageFetcher` retries 3× on its own *and* the job has `$tries = 3`, so a persistently failing URL can cost up to 9 HTTP requests. Collapse that into one layer if you tighten the throttle.
 
 ### Data model
 
@@ -96,7 +98,7 @@ Tests run against `sqlite :memory:` with `QUEUE_CONNECTION=sync`. `RefreshDataba
 uses(RefreshDatabase::class);
 ```
 
-There is no scraper test coverage yet. `Http::fake()` plus a fixture HTML string exercises fetch → parse → store with no network.
+`tests/Feature/ScrapeProductPageTest.php` covers the pipeline with `Http::fake()` and a fixture HTML string, so nothing hits the network: fetch → parse → store, the re-scrape upsert, the skip for link-less cards, the queue middleware, and command dispatch via `Queue::fake()`. Follow that pattern rather than pointing tests at a live store.
 
 ## Code style
 
@@ -110,7 +112,7 @@ Run after touching any PHP file. There is no `pint.json`, so Pint uses the defau
 
 ```
 app/
-  Console/Commands/RunScrapper.php     scraper:run — enqueues a page
+  Console/Commands/RunScraper.php      scraper:run — enqueues a page
   Jobs/ScrapeProductPage.php           queued orchestrator
   Models/Product.php
   Services/Scrapper/

@@ -1,8 +1,8 @@
 <?php
+
 namespace App\Services\Scrapper;
 
-
-use spatie\Browsershot\Browsershot;
+use Spatie\Browsershot\Browsershot;
 
 class JsPageFetcher
 {
@@ -12,6 +12,4 @@ class JsPageFetcher
             ->waitUntilNetworkIdle()
             ->bodyHtml();
     }
-
-    
 }

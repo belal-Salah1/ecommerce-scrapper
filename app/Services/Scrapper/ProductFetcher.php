@@ -6,7 +6,10 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class ProductFetcher
 {
-    public function Parse(string $html)
+    /**
+     * @return array<int, array{name: string, price: string, url: string}>
+     */
+    public function parse(string $html): array
     {
         $crawler = new Crawler($html);
 

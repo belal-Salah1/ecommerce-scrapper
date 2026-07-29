@@ -7,7 +7,8 @@ use Illuminate\Console\Command;
 
 class RunScraper extends Command
 {
-    protected $signature   = 'scraper:run {url}';
+    protected $signature = 'scraper:run {url}';
+
     protected $description = 'Dispatches a scraping job for a given URL';
 
     public function handle(): void

@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-E-commerce scraper on a Laravel 13 skeleton. There is no HTTP surface for the domain — `routes/web.php` still serves the welcome view, and the only `Controller` is the default. Everything happens through an Artisan command and a queued job. There are no tests for any of it yet.
+E-commerce scraper on a Laravel 13 skeleton. There is no HTTP surface for the domain — `routes/web.php` still serves the welcome view, and the only `Controller` is the default. Everything happens through an Artisan command and a queued job.
 
 The pipeline, one class per stage, all resolved from the container:
 
 ```
-scraper:run <url>                          app/Console/Commands/RunScrapper.php
+scraper:run <url>                          app/Console/Commands/RunScraper.php
   └─ ScrapeProductPage($url)               app/Jobs/ScrapeProductPage.php
        ├─ PageFetcher::fetch(url): string
        ├─ ProductFetcher::parse(html): array   ['name','price','url'][]
@@ -43,9 +43,9 @@ npm run build           # or `npm run dev` for the Vite watcher
 - **Everything is SQLite** (`database/database.sqlite`), and queue, cache, and session all use the `database` driver. The `jobs`/`job_batches`/`failed_jobs`, `cache`/`cache_locks`, and `sessions` tables already exist in the three baseline migrations. Queued work therefore needs a running worker — `composer dev` provides one.
 - **Tests run against `sqlite :memory:`** (`phpunit.xml`), with `QUEUE_CONNECTION=sync`. `RefreshDatabase` is deliberately commented out in `tests/Pest.php`, so any test needing the database must opt in with `uses(RefreshDatabase::class)` in its file, or you enable it globally there.
 - Pest 4 with `pest-plugin-laravel`; no `pint.json`, so Pint uses the default Laravel preset.
-- **`Product` has no factory.** `database/factories/` holds only `UserFactory`. Generate one before writing a test that needs product rows.
+- **`Product` has no factory.** `database/factories/` holds only `UserFactory`. Generate one before writing a test that needs arbitrary product rows — `tests/Feature/ScrapeProductPageTest.php` gets its rows through the pipeline itself, via `Http::fake()` and a fixture HTML string, so it doesn't need one. Never point a test at a live store.
 - `bootstrap/app.php` registers nothing custom, so Artisan commands rely on Laravel's **auto-discovery of `app/Console/Commands`, which derives the class name from the file path**. A filename that doesn't match its class is skipped silently — the command simply won't appear in `php artisan list`. Confirm registration there after adding or renaming a command; a passing `class_exists()` is not proof, because Composer's optimized classmap resolves the class even when PSR-4 wouldn't.
-- Queue middleware lives in `Illuminate\Queue\Middleware\*` (`RateLimited`, `ThrottlesExceptions`, `WithoutOverlapping`, `Skip`, …). There is no `Illuminate\Queue\Throttle`. `RateLimited` needs a named limiter registered via `RateLimiter::for()` in a service provider.
+- Queue middleware lives in `Illuminate\Queue\Middleware\*` (`RateLimited`, `ThrottlesExceptions`, `WithoutOverlapping`, `Skip`, …) — there is no `Illuminate\Queue\Throttle`, and `RateLimited` takes the *name* of a limiter, not inline limits. The scraper's `scraper` limiter is registered in `AppServiceProvider::boot()` at 10/minute; change the rate there, not in the job.
 - Retry budgets currently stack: `PageFetcher` does `->retry(3, 1000)` *and* the job sets `$tries = 3`, so one URL can produce up to 9 HTTP requests. Keep retries in one layer when touching either.
 
 ## Agent tooling in this repo
