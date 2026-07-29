@@ -4,11 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Greenfield e-commerce scraper. Right now this is an unmodified Laravel 13 skeleton plus a scraping toolkit added to `composer.json` — no scraper code exists yet. `app/` contains only the default `Controller`, `User` model, and `AppServiceProvider`; `routes/web.php` serves the welcome view. Expect to create the domain (models, jobs, commands, services) rather than to find it.
+E-commerce scraper on a Laravel 13 skeleton. There is no HTTP surface for the domain — `routes/web.php` still serves the welcome view, and the only `Controller` is the default. Everything happens through an Artisan command and a queued job. There are no tests for any of it yet.
+
+The pipeline, one class per stage, all resolved from the container:
+
+```
+scraper:run <url>                          app/Console/Commands/RunScrapper.php
+  └─ ScrapeProductPage($url)               app/Jobs/ScrapeProductPage.php
+       ├─ PageFetcher::fetch(url): string
+       ├─ ProductFetcher::parse(html): array   ['name','price','url'][]
+       └─ ProductStorer::store(items): void    updateOrCreate keyed on url
+```
+
+Services live in `app/Services/Scrapper/` — note the **two-p `Scrapper`** namespace, which is easy to mistype as `Scraper`. Class names are also inconsistent with their roles (`ProductFetcher` parses; it does not fetch). Verify with `class_exists()` before assuming an import resolves.
 
 The scraping stack chosen by the dependencies:
-- **Guzzle** for HTTP — use Laravel's `Http` facade, which wraps it (see the `http-client` skill rule).
+- **Guzzle** for HTTP — used via Laravel's `Http` facade in `PageFetcher`.
 - **`symfony/dom-crawler` + `symfony/css-selector`** for parsing (`new Crawler($html)` then `->filter('css selector')`). The CSS selector package is what makes `filter()` accept CSS instead of XPath.
+- **`spatie/browsershot`** for client-rendered pages, in `JsPageFetcher`. Same `fetch(string): string` shape as `PageFetcher` but **not wired into the job** — nothing selects between the two fetchers. Needs a Chromium/Puppeteer binary that `composer setup` does not install, so don't add it to a code path that tests or CI will hit.
+
+`ProductFetcher`'s selectors (`.product-card`, `.product-title`, `.price`) are placeholders that match no real store, and each field has a fallback default, so a mis-targeted page yields placeholder rows (`'default name'`, `'0.00$'`, `'#'`) instead of an error. `ProductStorer` skips the `'#'` ones.
+
+`price` is a **string** column holding raw scraped text like `"$19.99"` — not numeric, so it can't be sorted or compared. `url` is `unique()` because it's the `updateOrCreate` key, and it's stored exactly as the `href` appears in the markup (relative hrefs are not resolved against the page URL).
 
 ## Commands
 
@@ -24,12 +41,17 @@ npm run build           # or `npm run dev` for the Vite watcher
 ## Infrastructure notes
 
 - **Everything is SQLite** (`database/database.sqlite`), and queue, cache, and session all use the `database` driver. The `jobs`/`job_batches`/`failed_jobs`, `cache`/`cache_locks`, and `sessions` tables already exist in the three baseline migrations. Queued work therefore needs a running worker — `composer dev` provides one.
-- **Tests run against `sqlite :memory:`** (`phpunit.xml`). `RefreshDatabase` is deliberately commented out in `tests/Pest.php`, so any test needing the database must opt in with `uses(RefreshDatabase::class)` in its file, or you enable it globally there.
+- **Tests run against `sqlite :memory:`** (`phpunit.xml`), with `QUEUE_CONNECTION=sync`. `RefreshDatabase` is deliberately commented out in `tests/Pest.php`, so any test needing the database must opt in with `uses(RefreshDatabase::class)` in its file, or you enable it globally there.
 - Pest 4 with `pest-plugin-laravel`; no `pint.json`, so Pint uses the default Laravel preset.
+- **`Product` has no factory.** `database/factories/` holds only `UserFactory`. Generate one before writing a test that needs product rows.
+- `bootstrap/app.php` registers nothing custom, so Artisan commands rely on Laravel's **auto-discovery of `app/Console/Commands`, which derives the class name from the file path**. A filename that doesn't match its class is skipped silently — the command simply won't appear in `php artisan list`. Confirm registration there after adding or renaming a command; a passing `class_exists()` is not proof, because Composer's optimized classmap resolves the class even when PSR-4 wouldn't.
+- Queue middleware lives in `Illuminate\Queue\Middleware\*` (`RateLimited`, `ThrottlesExceptions`, `WithoutOverlapping`, `Skip`, …). There is no `Illuminate\Queue\Throttle`. `RateLimited` needs a named limiter registered via `RateLimiter::for()` in a service provider.
+- Retry budgets currently stack: `PageFetcher` does `->retry(3, 1000)` *and* the job sets `$tries = 3`, so one URL can produce up to 9 HTTP requests. Keep retries in one layer when touching either.
 
 ## Agent tooling in this repo
 
-- `CLAUDE.md` (this file, inside the `<laravel-boost-guidelines>
+- Boost's generated rules are appended to this file inside the `<laravel-boost-guidelines>` block below. **Do not hand-edit that block** — `composer post-update-cmd` runs `php artisan boost:update`, which regenerates it. Project-specific guidance belongs in the sections above it.
+- Boost MCP tools worth reaching for here: `database-schema` and `database-query` against the SQLite file, `read-log-entries` / `last-error` for what a worker actually did, and `search-docs` for version-matched Laravel 13 docs.
 === foundation rules ===
 
 # Laravel Boost Guidelines
